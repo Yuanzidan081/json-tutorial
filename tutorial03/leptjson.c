@@ -1,53 +1,73 @@
 #include "leptjson.h"
-#include <assert.h>  /* assert() */
-#include <errno.h>   /* errno, ERANGE */
-#include <math.h>    /* HUGE_VAL */
-#include <stdlib.h>  /* NULL, malloc(), realloc(), free(), strtod() */
-#include <string.h>  /* memcpy() */
+#include <assert.h> /* assert() */
+#include <errno.h>  /* errno, ERANGE */
+#include <math.h>   /* HUGE_VAL */
+#include <stdlib.h> /* NULL, malloc(), realloc(), free(), strtod() */
+#include <string.h> /* memcpy() */
 
 #ifndef LEPT_PARSE_STACK_INIT_SIZE
 #define LEPT_PARSE_STACK_INIT_SIZE 256
 #endif
 
-#define EXPECT(c, ch)       do { assert(*c->json == (ch)); c->json++; } while(0)
-#define ISDIGIT(ch)         ((ch) >= '0' && (ch) <= '9')
-#define ISDIGIT1TO9(ch)     ((ch) >= '1' && (ch) <= '9')
-#define PUTC(c, ch)         do { *(char*)lept_context_push(c, sizeof(char)) = (ch); } while(0)
+#define EXPECT(c, ch)             \
+    do                            \
+    {                             \
+        assert(*c->json == (ch)); \
+        c->json++;                \
+    } while (0)
+#define ISDIGIT(ch) ((ch) >= '0' && (ch) <= '9')
+#define ISDIGIT1TO9(ch) ((ch) >= '1' && (ch) <= '9')
+#define ISCHAR(ch) (!((ch) >= '\001' && (ch) <= '\037')) /*字符不在0到31的范围*/
+#define PUTC(c, ch)                                         \
+    do                                                      \
+    {                                                       \
+        *(char *)lept_context_push(c, sizeof(char)) = (ch); \
+    } while (0)
 
-typedef struct {
-    const char* json;
-    char* stack;
+typedef struct
+{
+    const char *json;
+    char *stack; /* 在字符串的解析里面会用到 */
     size_t size, top;
-}lept_context;
+} lept_context;
 
-static void* lept_context_push(lept_context* c, size_t size) {
-    void* ret;
+/* 返回的是栈的最后一个指向存在元素的指针，top相当于是字符串的长度 */
+static void *lept_context_push(lept_context *c, size_t size)
+{
+    void *ret;
     assert(size > 0);
-    if (c->top + size >= c->size) {
+    if (c->top + size >= c->size)
+    {
         if (c->size == 0)
             c->size = LEPT_PARSE_STACK_INIT_SIZE;
         while (c->top + size >= c->size)
-            c->size += c->size >> 1;  /* c->size * 1.5 */
-        c->stack = (char*)realloc(c->stack, c->size);
+            c->size += c->size >> 1; /* c->size * 1.5 */
+        /*c->stack 在初始化时为 NULL，realloc(NULL, size) 的行为是等价于 malloc(size) 的*/
+        c->stack = (char *)realloc(c->stack, c->size); /* 重新对内存进行分配 */
     }
     ret = c->stack + c->top;
     c->top += size;
     return ret;
 }
 
-static void* lept_context_pop(lept_context* c, size_t size) {
-    assert(c->top >= size);
+static void *lept_context_pop(lept_context *c, size_t size)
+{
+    /* assert(c->top == size); */
+    /* 会有大于的情况吗，下面原来是大于等于 */
+    assert(c->top == size);
     return c->stack + (c->top -= size);
 }
 
-static void lept_parse_whitespace(lept_context* c) {
+static void lept_parse_whitespace(lept_context *c)
+{
     const char *p = c->json;
     while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
         p++;
     c->json = p;
 }
 
-static int lept_parse_literal(lept_context* c, lept_value* v, const char* literal, lept_type type) {
+static int lept_parse_literal(lept_context *c, lept_value *v, const char *literal, lept_type type)
+{
     size_t i;
     EXPECT(c, literal[0]);
     for (i = 0; literal[i + 1]; i++)
@@ -58,24 +78,37 @@ static int lept_parse_literal(lept_context* c, lept_value* v, const char* litera
     return LEPT_PARSE_OK;
 }
 
-static int lept_parse_number(lept_context* c, lept_value* v) {
-    const char* p = c->json;
-    if (*p == '-') p++;
-    if (*p == '0') p++;
-    else {
-        if (!ISDIGIT1TO9(*p)) return LEPT_PARSE_INVALID_VALUE;
-        for (p++; ISDIGIT(*p); p++);
-    }
-    if (*p == '.') {
+static int lept_parse_number(lept_context *c, lept_value *v)
+{
+    const char *p = c->json;
+    if (*p == '-')
         p++;
-        if (!ISDIGIT(*p)) return LEPT_PARSE_INVALID_VALUE;
-        for (p++; ISDIGIT(*p); p++);
-    }
-    if (*p == 'e' || *p == 'E') {
+    if (*p == '0')
         p++;
-        if (*p == '+' || *p == '-') p++;
-        if (!ISDIGIT(*p)) return LEPT_PARSE_INVALID_VALUE;
-        for (p++; ISDIGIT(*p); p++);
+    else
+    {
+        if (!ISDIGIT1TO9(*p))
+            return LEPT_PARSE_INVALID_VALUE;
+        for (p++; ISDIGIT(*p); p++)
+            ;
+    }
+    if (*p == '.')
+    {
+        p++;
+        if (!ISDIGIT(*p))
+            return LEPT_PARSE_INVALID_VALUE;
+        for (p++; ISDIGIT(*p); p++)
+            ;
+    }
+    if (*p == 'e' || *p == 'E')
+    {
+        p++;
+        if (*p == '+' || *p == '-')
+            p++;
+        if (!ISDIGIT(*p))
+            return LEPT_PARSE_INVALID_VALUE;
+        for (p++; ISDIGIT(*p); p++)
+            ;
     }
     errno = 0;
     v->u.n = strtod(c->json, NULL);
@@ -86,40 +119,92 @@ static int lept_parse_number(lept_context* c, lept_value* v) {
     return LEPT_PARSE_OK;
 }
 
-static int lept_parse_string(lept_context* c, lept_value* v) {
-    size_t head = c->top, len;
-    const char* p;
-    EXPECT(c, '\"');
+static int lept_parse_string(lept_context *c, lept_value *v)
+{
+    size_t head = c->top, len; /* head 默认是0 */
+    const char *p;
+    EXPECT(c, '\"'); /*先把"跳过去*/
     p = c->json;
-    for (;;) {
+    for (;;)
+    {
         char ch = *p++;
-        switch (ch) {
+        switch (ch)
+        {
+        case '\"':
+            len = c->top - head; /*反着来pop，如果没有遇到\0，c->top表示的是字符串的长度，head是初始的c->top，所以得到的就是字符串的长度，*/
+            /* lept_context_pop弹出了字符串头的指针，把c赋值到v上去*/
+            lept_set_string(v, (const char *)lept_context_pop(c, len), len);
+            c->json = p;
+            return LEPT_PARSE_OK;
+        case '\0':                                 /*应该是"abc"有有引号以\0结尾的字符串，碰到引号后最后一个字符应该是\0表示结束了*/
+            c->top = head;                         /* 重新回到初始的c->top 说明找到了字符串的末尾*/
+            return LEPT_PARSE_MISS_QUOTATION_MARK; /* 直接不看后面的字符串了，丢失了另一边的双引号 */
+        case '\\':                                 /* 多字符的判断 */
+        {
+            switch (*p++)
+            {
             case '\"':
-                len = c->top - head;
-                lept_set_string(v, (const char*)lept_context_pop(c, len), len);
-                c->json = p;
-                return LEPT_PARSE_OK;
-            case '\0':
-                c->top = head;
-                return LEPT_PARSE_MISS_QUOTATION_MARK;
+                PUTC(c, '\"');
+                break;
+            case '\\':
+                PUTC(c, '\\');
+                break;
+            case '/':
+                PUTC(c, '/');
+                break;
+            case 'b':
+                PUTC(c, '\b');
+                break;
+            case 'f':
+                PUTC(c, '\f');
+                break;
+            case 'n':
+                PUTC(c, '\n');
+                break;
+            case 'r':
+                PUTC(c, '\r');
+                break;
+            case 't':
+                PUTC(c, '\t');
+                break;
             default:
+                return LEPT_PARSE_INVALID_STRING_ESCAPE;
+            }
+
+            break;
+        }
+        default:
+        {
+            if (ISCHAR(ch))
                 PUTC(c, ch);
+            else
+                return LEPT_PARSE_INVALID_STRING_CHAR;
+        }
         }
     }
 }
 
-static int lept_parse_value(lept_context* c, lept_value* v) {
-    switch (*c->json) {
-        case 't':  return lept_parse_literal(c, v, "true", LEPT_TRUE);
-        case 'f':  return lept_parse_literal(c, v, "false", LEPT_FALSE);
-        case 'n':  return lept_parse_literal(c, v, "null", LEPT_NULL);
-        default:   return lept_parse_number(c, v);
-        case '"':  return lept_parse_string(c, v);
-        case '\0': return LEPT_PARSE_EXPECT_VALUE;
+static int lept_parse_value(lept_context *c, lept_value *v)
+{
+    switch (*c->json)
+    {
+    case 't':
+        return lept_parse_literal(c, v, "true", LEPT_TRUE);
+    case 'f':
+        return lept_parse_literal(c, v, "false", LEPT_FALSE);
+    case 'n':
+        return lept_parse_literal(c, v, "null", LEPT_NULL);
+    default:
+        return lept_parse_number(c, v);
+    case '"':
+        return lept_parse_string(c, v);
+    case '\0':
+        return LEPT_PARSE_EXPECT_VALUE;
     }
 }
 
-int lept_parse(lept_value* v, const char* json) {
+int lept_parse(lept_value *v, const char *json)
+{
     lept_context c;
     int ret;
     assert(v != NULL);
@@ -128,62 +213,81 @@ int lept_parse(lept_value* v, const char* json) {
     c.size = c.top = 0;
     lept_init(v);
     lept_parse_whitespace(&c);
-    if ((ret = lept_parse_value(&c, v)) == LEPT_PARSE_OK) {
+    if ((ret = lept_parse_value(&c, v)) == LEPT_PARSE_OK)
+    {
         lept_parse_whitespace(&c);
-        if (*c.json != '\0') {
+        if (*c.json != '\0')
+        {
             v->type = LEPT_NULL;
             ret = LEPT_PARSE_ROOT_NOT_SINGULAR;
         }
     }
-    assert(c.top == 0);
+    assert(c.top == 0); /*释放stack内存的时候添加断言确保数据都被弹出了*/
     free(c.stack);
     return ret;
 }
 
-void lept_free(lept_value* v) {
+void lept_free(lept_value *v)
+{
     assert(v != NULL);
     if (v->type == LEPT_STRING)
-        free(v->u.s.s);
+        free(v->u.s.s); /* 内存管理的重要性 */
     v->type = LEPT_NULL;
 }
 
-lept_type lept_get_type(const lept_value* v) {
+lept_type lept_get_type(const lept_value *v)
+{
     assert(v != NULL);
     return v->type;
 }
 
-int lept_get_boolean(const lept_value* v) {
+int lept_get_boolean(const lept_value *v)
+{
     /* \TODO */
-    return 0;
+    assert(v != NULL && (v->type == LEPT_TRUE || v->type == LEPT_FALSE));
+    return ((v->type == LEPT_TRUE) ? 1 : 0);
 }
 
-void lept_set_boolean(lept_value* v, int b) {
+void lept_set_boolean(lept_value *v, int b)
+{
     /* \TODO */
+    assert(v != NULL && (b == 0 || b == 1));
+    lept_free(v);
+    v->type = ((b) ? LEPT_TRUE : LEPT_FALSE);
 }
 
-double lept_get_number(const lept_value* v) {
+double lept_get_number(const lept_value *v)
+{
     assert(v != NULL && v->type == LEPT_NUMBER);
     return v->u.n;
 }
 
-void lept_set_number(lept_value* v, double n) {
+void lept_set_number(lept_value *v, double n)
+{
     /* \TODO */
+    assert(v != NULL);
+    lept_free(v);
+    v->u.n = n;
+    v->type = LEPT_NUMBER;
 }
 
-const char* lept_get_string(const lept_value* v) {
+const char *lept_get_string(const lept_value *v)
+{
     assert(v != NULL && v->type == LEPT_STRING);
     return v->u.s.s;
 }
 
-size_t lept_get_string_length(const lept_value* v) {
+size_t lept_get_string_length(const lept_value *v)
+{
     assert(v != NULL && v->type == LEPT_STRING);
     return v->u.s.len;
 }
 
-void lept_set_string(lept_value* v, const char* s, size_t len) {
+void lept_set_string(lept_value *v, const char *s, size_t len)
+{
     assert(v != NULL && (s != NULL || len == 0));
     lept_free(v);
-    v->u.s.s = (char*)malloc(len + 1);
+    v->u.s.s = (char *)malloc(len + 1);
     memcpy(v->u.s.s, s, len);
     v->u.s.s[len] = '\0';
     v->u.s.len = len;
