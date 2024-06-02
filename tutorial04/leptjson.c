@@ -140,6 +140,7 @@ static const char *lept_parse_hex4(const char *p, unsigned *u)
         }
         *u = (*u << 4) | s;
     }
+    /* 把判断代理对放到lept_parse_string循环好一点 */
     if (*u >= 0xD800 && *u <= 0xDBFF)
     {
         if (*t == '\\' && *(t + 1) == 'u')
@@ -177,7 +178,7 @@ static void lept_encode_utf8(lept_context *c, unsigned u)
     assert(u >= 0x0000 && u <= 0x10FFFF);
     if (u >= 0x0000 && u <= 0x007F)
     {
-        PUTC(c, (0x00 | (u & 0xFF)));
+        PUTC(c, (0x00 | (u & 0xFF))); /* 避免误判 */
     }
     else if (u >= 0x0080 && u <= 0x07FF)
     {
